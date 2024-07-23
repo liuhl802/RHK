@@ -1,0 +1,126 @@
+Impute_missing<-function(x)
+{
+  length(which(is.na(x)))->tpm
+  if(tpm>0)
+  {
+    impute<-sample(na.omit(x),tpm,replace=T)
+    x[which(is.na(x))]<-impute
+    return(x)
+  }
+  else
+  {
+    return(x)
+  }
+}
+set.seed(1000)
+Gen<-read.table("Genotype.txt",header = TRUE)
+nn=dim(Gen)[2]
+TPN=dim(Gen)[1]
+MKn=nn-1
+TTM=500
+write.table(TPN,file="Prediction_RHDK.txt",append=TRUE,col.names=FALSE,quote=FALSE)
+write.table(TTM,file="Prediction_RHDK.txt",append=TRUE,col.names=FALSE,quote=FALSE)
+write.table(TPN-TTM,file="Prediction_RHDK.txt",append=TRUE,col.names=FALSE,quote=FALSE)
+write.table(nn-1,file="Prediction_RHDK.txt",append=TRUE,col.names=FALSE,quote=FALSE)
+apply(Gen[,2:nn],2,Impute_missing)->Gen_IM
+cornPh <- read.table("Phenotype.txt",header = TRUE)
+Pheno_T=matrix(0,nrow=TPN,ncol=1)
+for(j in 1:TPN)
+{
+  Pheno_T[j,1]=cornPh[j,2]
+}
+for(i in 1:10)
+{
+  TMS=sample(1:TPN,TTM,replace=F)
+  Train_Marker=matrix(0,nrow=TTM,ncol=MKn)
+  Train_Phen=matrix(0,nrow=TTM,ncol=1)
+  Train_Marker=Gen_IM[TMS,]
+  Train_Phen=Pheno_T[TMS,]
+  Pheno_S=matrix(0,nrow=TTM,ncol=1)
+  Pheno_S=scale(Train_Phen)
+  AMarker=matrix(0,nrow=TTM,ncol=MKn)
+  AMarker_T=matrix(0,nrow=MKn,ncol=TTM)
+  AMarker=apply(Train_Marker,2,scale)
+  AMarker_T=t(AMarker)
+  MLMAVU=matrix(0,nrow=TTM,ncol=TTM)
+  MLMAVU=(AMarker%*%AMarker_T)*(1.0/MKn)
+  GIM=matrix(0,nrow=TTM,ncol=TTM)
+  Gr_Mp=matrix(0,nrow=1,ncol=MKn)
+  Gr_M=matrix(0,nrow=1,ncol=TTM)
+  TrGs=matrix(0,nrow=1,ncol=1)
+  R_V=matrix(0,nrow=1,ncol=1)
+  TrG2=0
+  TrG=TTM
+  GIM=diag(TTM)
+  for(j in 1:5)
+  {
+    Gr=matrix(rnorm(TTM),nrow=1,ncol=TTM)
+    Gr_Mp=(Gr%*%AMarker)*(1.0/MKn)
+    Gr_M=Gr_Mp%*%AMarker_T
+    TrGs=Gr_M%*%t(Gr_M)
+    TrG2=TrG2+TrGs[1,1]
+  }
+  TrG2=TrG2/5
+  R_V=(t(Pheno_S)%*%(MLMAVU-GIM)%*%Pheno_S)*(1.0/(TrG2-TrG))
+  if(R_V[1,1]>=1.0)
+  {
+    R_V[1,1]=0.999
+  }
+  else if(R_V[1,1]<=0.0)
+  {
+    R_V[1,1]=0.001
+  }
+  cname1=paste("Simulation",i,sep="_")
+  write.table(cname1,file="Prediction_RHDK.txt",append=TRUE,row.names=FALSE,col.names=FALSE,quote=FALSE)
+  HTTM2=TTM/2
+  CoreMarker=matrix(0,nrow=HTTM2,ncol=MKn)
+  CoreMarker_T=matrix(0,nrow=MKn,ncol=HTTM2)
+  CoreMarker=AMarker[1:HTTM2,]
+  CoreMarker_T=t(CoreMarker)
+  DDT=svd(CoreMarker)
+  EigenVT=t(DDT$v)
+  XCM=AMarker%*%t(EigenVT)
+  ABValue=matrix(0,nrow=1,ncol=1)
+  AMBreedE=matrix(0,nrow=HTTM2,ncol=1)
+  GRM=matrix(0,nrow=(1+HTTM2),ncol=(1+HTTM2))
+  GRM[1,1]=TTM
+  X_1=matrix(1,nrow=TTM,ncol=1)
+  SS=matrix(0,nrow=1,ncol=HTTM2)
+  SS=t(X_1)%*%XCM
+  GRM[1,2:(1+HTTM2)]=SS
+  GRM[2:(1+HTTM2),1]=t(SS)
+  GRM[2:(1+HTTM2),2:(1+HTTM2)]=t(XCM)%*%XCM+(((1-R_V[1,1])*MKn)/R_V[1,1])*diag(HTTM2)
+  Y_D=matrix(0,nrow=(1+HTTM2),ncol=1)
+  Y_D[1,1]=t(X_1)%*%Train_Phen
+  Y_D[2:(HTTM2+1),]=t(XCM)%*%Train_Phen
+  Xj=matrix(0,nrow=(1+HTTM2),ncol=1)
+  Xj=solve(GRM)%*%Y_D
+  ABValue[1,1]=Xj[1,1]
+  AMBreedE=Xj[2:(1+HTTM2),1]
+  AMBreed=matrix(0,nrow=MKn,ncol=1)
+  AMBreed=t(EigenVT)%*%AMBreedE
+  Candidate_Marker=matrix(0,nrow=(TPN-TTM),ncol=MKn)
+  Candidate_Phen=matrix(0,nrow=(TPN-TTM),ncol=1)
+  Candidate_Marker=Gen_IM[-TMS,]
+  Candidate_Phen=Pheno_T[-TMS,]
+  Candidate_MMean=colMeans(Candidate_Marker)
+  Candidate_MSd=apply(Candidate_Marker,2,sd)
+  Candidate_AMarker=matrix(0,nrow=(TPN-TTM),ncol=MKn)
+  for(j in 1:(TPN-TTM))
+  {
+    for(k in 1:MKn)
+    {
+      Candidate_AMarker[j,k]=(Candidate_Marker[j,k]-Candidate_MMean[k])/Candidate_MSd[k]
+    }
+  }
+  Candidate_XMatrix=matrix(1,nrow=(TPN-TTM),ncol=1)
+  Predicted_YA=matrix(0,nrow=(TPN-TTM),ncol=1)
+  Predicted_YA=ABValue[1,1]*Candidate_XMatrix+Candidate_AMarker%*%AMBreed
+  COR_YR=matrix(0,nrow=1,ncol=1)
+  COR_YR=cor(Candidate_Phen,Predicted_YA)
+  R2=matrix(0,nrow=1,ncol=1)
+  R2[1,1]=COR_YR[1,1]*COR_YR[1,1]
+  rname2=c("Prediction R2=")
+  rownames(R2)=c(rname2)
+  write.table(R2,file="Prediction_RHDK.txt",append=TRUE,col.names=FALSE,quote=FALSE)
+}
