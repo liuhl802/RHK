@@ -1,0 +1,136 @@
+Impute_missing<-function(x)
+{
+  length(which(is.na(x)))->tpm
+  if(tpm>0)
+  {
+    impute<-sample(na.omit(x),tpm,replace=T)
+    x[which(is.na(x))]<-impute
+    return(x)
+  }
+  else
+  {
+    return(x)
+  }
+}
+set.seed(1000)
+Gen<-read.table("Genotype.txt",header = TRUE)
+nn=dim(Gen)[2]
+TPN=dim(Gen)[1]
+MKn=nn-1
+TTM=500
+write.table(TPN,file="Prediction_GBLUP.txt",append=TRUE,col.names=FALSE,quote=FALSE)
+write.table(TTM,file="Prediction_GBLUP.txt",append=TRUE,col.names=FALSE,quote=FALSE)
+write.table(TPN-TTM,file="Prediction_GBLUP.txt",append=TRUE,col.names=FALSE,quote=FALSE)
+write.table(nn-1,file="Prediction_GBLUP.txt",append=TRUE,col.names=FALSE,quote=FALSE)
+apply(Gen[,2:nn],2,Impute_missing)->Gen_IM
+cornPh <- read.table("Phenotype.txt",header = TRUE)
+Pheno_T=matrix(0,nrow=TPN,ncol=1)
+for(j in 1:TPN)
+{
+  Pheno_T[j,1]=cornPh[j,2]
+}
+for(i in 1:10)
+{
+  TMS=sample(1:TPN,TTM,replace=F)
+  Train_Marker=matrix(0,nrow=TTM,ncol=MKn)
+  Train_Phen=matrix(0,nrow=TTM,ncol=1)
+  Train_Marker=Gen_IM[TMS,]
+  Train_Phen=Pheno_T[TMS,]
+  Pheno_S=matrix(0,nrow=TTM,ncol=1)
+  Pheno_S=scale(Train_Phen)
+  AMarker=matrix(0,nrow=TTM,ncol=MKn)
+  AMarker_T=matrix(0,nrow=(nn-1),ncol=TTM)
+  AMarker=apply(Train_Marker,2,scale)
+  AMarker_T=t(AMarker)
+  IMatrix=diag(TTM)
+  XMatrix=matrix(1,nrow=TTM,ncol=1)
+  XMatrix_T=matrix(1,nrow=1,ncol=TTM)
+  AMarker_T=t(AMarker)
+  MLMAVU=matrix(0,nrow=TTM,ncol=TTM)
+  MLMAVU=(AMarker%*%AMarker_T)*(1.0/MKn)
+  VarM=matrix(0,nrow=2,ncol=1)
+  VarM[1,1]=0.3
+  VarM[2,1]=0.7
+  MLMV=matrix(0,nrow=TTM,ncol=TTM)
+  MLMV_I=matrix(0,nrow=TTM,ncol=TTM)
+  P1=matrix(0,nrow=TTM,ncol=TTM)
+  P2=matrix(0,nrow=TTM,ncol=TTM)
+  P3=matrix(0,nrow=1,ncol=1)
+  P4=matrix(0,nrow=1,ncol=1)
+  LB=matrix(0,nrow=2,ncol=1)
+  FP=matrix(0,nrow=2,ncol=2)
+  VarM1=matrix(0,nrow=2,ncol=1)
+  Pheno_S_T=t(Pheno_S)
+  for(j in 1:8)
+  {
+    MLMV=MLMAVU*VarM[1,1]+IMatrix*VarM[2,1]
+    MLMV_I=solve(MLMV)
+    MLMP=XMatrix_T%*%MLMV_I%*%XMatrix
+    MLMP_I=solve(MLMP)
+    MLMPM=MLMV_I-MLMV_I%*%XMatrix%*%MLMP_I%*%XMatrix_T%*%MLMV_I
+    P1=MLMPM%*%MLMAVU%*%MLMPM
+    P2=MLMPM%*%MLMPM
+    P3=Pheno_S_T%*%P1%*%Pheno_S
+    P4=Pheno_S_T%*%P2%*%Pheno_S
+    LB[1,1]=P3[1,1]
+    LB[2,1]=P4[1,1]
+    FP[1,1]=sum(diag((AMarker_T%*%P1%*%AMarker)*(1.0/MKn)))
+    FP[1,2]=sum(diag((AMarker_T%*%P2%*%AMarker)*(1.0/MKn)))
+    FP[2,1]=sum(diag(P1))
+    FP[2,2]=sum(diag(P2))
+    VarM1=VarM
+    VarM=(solve(FP))%*%LB
+    Differn=abs(VarM[1,1]-VarM1[1,1])
+    if(Differn<0.01)
+    {
+      if(VarM[1,1]<=0.0)
+      {
+        VarM[1,1]=0.001
+      }
+      else if(VarM[1,1]>=1.0)
+      {
+        VarM[1,1]=0.999
+      }
+      break
+    }
+  }
+  MLM_H=matrix(0,nrow=1,ncol=1)
+  MLM_H[1,1]=VarM[1,1]
+  cname1=paste("Simulation",i,sep="_")
+  write.table(cname1,file="Prediction_GBLUP.txt",append=TRUE,row.names=FALSE,col.names=FALSE,quote=FALSE)
+  VAMatrix=matrix(0,nrow=TTM,ncol=TTM)
+  Variance_TP=var(Train_Phen)
+  VAMatrix=((MLM_H[1,1]*Variance_TP)*(1/MKn))*(AMarker%*%AMarker_T)+((1.0-MLM_H[1,1])*Variance_TP)*IMatrix
+  VAMatrix_I=matrix(0,nrow=TTM,ncol=TTM)
+  VAMatrix_I=solve(VAMatrix)
+  PartA_I=matrix(0,nrow=1,ncol=1)
+  PartA_I=solve(XMatrix_T%*%VAMatrix_I%*%XMatrix)
+  ABValue=matrix(0,nrow=1,ncol=1)
+  ABValue=PartA_I%*%XMatrix_T%*%VAMatrix_I%*%Train_Phen
+  AMBreed=matrix(0,nrow=MKn,ncol=1)
+  AMBreed=((MLM_H[1,1]*Variance_TP)*(1.0/MKn)*AMarker_T)%*%VAMatrix_I%*%(Train_Phen-ABValue[1,1]*XMatrix)
+  Candidate_Marker=matrix(0,nrow=(TPN-TTM),ncol=MKn)
+  Candidate_Phen=matrix(0,nrow=(TPN-TTM),ncol=1)
+  Candidate_Marker=Gen_IM[-TMS,]
+  Candidate_Phen=Pheno_T[-TMS,]
+  Candidate_MMean=colMeans(Candidate_Marker)
+  Candidate_MSd=apply(Candidate_Marker,2,sd)
+  Candidate_AMarker=matrix(0,nrow=(TPN-TTM),ncol=MKn)
+  for(j in 1:(TPN-TTM))
+  {
+    for(k in 1:MKn)
+    {
+      Candidate_AMarker[j,k]=(Candidate_Marker[j,k]-Candidate_MMean[k])/Candidate_MSd[k]
+    }
+  }
+  Candidate_XMatrix=matrix(1,nrow=(TPN-TTM),ncol=1)
+  Predicted_YA=matrix(0,nrow=(TPN-TTM),ncol=1)
+  Predicted_YA=ABValue[1,1]*Candidate_XMatrix+Candidate_AMarker%*%AMBreed
+  COR_YR=matrix(0,nrow=1,ncol=1)
+  COR_YR=cor(Candidate_Phen,Predicted_YA)
+  R2=matrix(0,nrow=1,ncol=1)
+  R2[1,1]=COR_YR[1,1]*COR_YR[1,1]
+  rname2=c("Prediction R2=")
+  rownames(R2)=c(rname2)
+  write.table(R2,file="Prediction_GBLUP.txt",append=TRUE,col.names=FALSE,quote=FALSE)
+}
